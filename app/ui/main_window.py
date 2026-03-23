@@ -22,7 +22,7 @@ from app.services.dry_run_analyzer import DryRunResult, RowError
 
 
 class MainWindow(QMainWindow):
-    """Main view for the stage-2 application."""
+    """Main view for the stage-3 application."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -40,11 +40,13 @@ class MainWindow(QMainWindow):
         self.create_excel_button = QPushButton("엑셀 생성")
         self.select_excel_button = QPushButton("엑셀 선택")
         self.dry_run_button = QPushButton("미리보기 (dry-run)")
+        self.apply_button = QPushButton("적용 (apply)")
         self.exit_button = QPushButton("종료")
 
         button_layout.addWidget(self.create_excel_button)
         button_layout.addWidget(self.select_excel_button)
         button_layout.addWidget(self.dry_run_button)
+        button_layout.addWidget(self.apply_button)
         button_layout.addStretch(1)
         button_layout.addWidget(self.exit_button)
 
@@ -52,6 +54,11 @@ class MainWindow(QMainWindow):
         self.selected_path_edit = QLineEdit()
         self.selected_path_edit.setReadOnly(True)
         self.selected_path_edit.setPlaceholderText("아직 선택된 엑셀 파일이 없습니다.")
+
+        status_group = QGroupBox("진행 상태")
+        status_layout = QVBoxLayout(status_group)
+        self.status_message_label = QLabel("대기")
+        status_layout.addWidget(self.status_message_label)
 
         summary_group = QGroupBox("분석 요약")
         summary_layout = QGridLayout(summary_group)
@@ -101,6 +108,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(button_layout)
         main_layout.addWidget(path_label)
         main_layout.addWidget(self.selected_path_edit)
+        main_layout.addWidget(status_group)
         main_layout.addWidget(summary_group)
         main_layout.addWidget(results_group, stretch=1)
         main_layout.addWidget(log_label)
@@ -147,6 +155,9 @@ class MainWindow(QMainWindow):
         self.delete_candidates_output.setPlainText(self._format_items(result.delete_candidates, "삭제 후보 폴더가 없습니다."))
         self.danger_folders_output.setPlainText(self._format_items(result.danger_folders, "위험 폴더가 없습니다."))
         self.row_errors_output.setPlainText(self._format_errors(result.row_errors))
+
+    def set_status_message(self, message: str) -> None:
+        self.status_message_label.setText(message)
 
     def _format_items(self, items: list[str], empty_message: str) -> str:
         if not items:

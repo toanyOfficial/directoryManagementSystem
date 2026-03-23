@@ -8,6 +8,8 @@ from openpyxl import load_workbook
 from app.services.excel_schema import EXCEL_HEADERS
 from app.utils.path_validator import FolderNameValidator
 
+_SYSTEM_DIRECTORIES = {"logs", "backups"}
+
 
 @dataclass(frozen=True)
 class RowError:
@@ -45,6 +47,10 @@ class DryRunResult:
     delete_candidates: list[str] = field(default_factory=list)
     danger_folders: list[str] = field(default_factory=list)
     row_errors: list[RowError] = field(default_factory=list)
+    parsed_rows: list[ParsedRow] = field(default_factory=list)
+    create_relative_paths: list[Path] = field(default_factory=list)
+    delete_relative_paths: list[Path] = field(default_factory=list)
+    danger_relative_paths: list[Path] = field(default_factory=list)
 
 
 class DryRunAnalyzer:
@@ -138,6 +144,10 @@ class DryRunAnalyzer:
             delete_candidates=[self._format_path(path) for path in delete_candidates],
             danger_folders=[self._format_path(path) for path in danger_folders],
             row_errors=row_errors,
+            parsed_rows=parsed_rows,
+            create_relative_paths=create_candidates,
+            delete_relative_paths=delete_candidates,
+            danger_relative_paths=danger_folders,
         )
 
     def _validate_row(self, row_values: list[str]) -> list[str]:
@@ -181,7 +191,10 @@ class DryRunAnalyzer:
         for path in target_root.rglob("*"):
             if not path.is_dir():
                 continue
-            actual_directories.add(path.relative_to(target_root))
+            relative_path = path.relative_to(target_root)
+            if relative_path.parts and relative_path.parts[0] in _SYSTEM_DIRECTORIES:
+                continue
+            actual_directories.add(relative_path)
         return actual_directories
 
     def _sort_key(self, path: Path) -> tuple[int, str]:
