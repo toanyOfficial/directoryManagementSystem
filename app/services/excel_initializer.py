@@ -8,7 +8,8 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
-_HEADERS: tuple[str, ...] = ("대분류", "중분류", "소분류", "업무", "비고")
+from app.services.excel_schema import EXCEL_HEADERS
+
 _COLUMN_WIDTHS: dict[str, float] = {
     "A": 20,
     "B": 20,
@@ -69,7 +70,7 @@ class ExcelInitializer:
         header_font = Font(bold=True)
         header_alignment = Alignment(horizontal="center", vertical="center")
 
-        for column_index, header in enumerate(_HEADERS, start=1):
+        for column_index, header in enumerate(EXCEL_HEADERS, start=1):
             cell = worksheet.cell(row=1, column=column_index, value=header)
             cell.fill = header_fill
             cell.font = header_font
