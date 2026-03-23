@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-project_root = Path(__file__).resolve().parent
+project_root = Path(globals().get("SPECPATH", ".")).resolve()
 
 a = Analysis(
     ["app/gui_app.py"],
