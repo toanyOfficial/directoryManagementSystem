@@ -112,6 +112,7 @@ class ApplyService:
                 raise RuntimeError("위험 폴더가 존재하여 적용을 중단합니다.")
 
             self._ensure_empty_delete_candidates(target_root, dry_run_result.delete_relative_paths)
+            self._ensure_excel_writable(resolved_excel_path)
             backup_path = backups_directory / f"{resolved_excel_path.stem}_{timestamp}{resolved_excel_path.suffix}"
             copy2(resolved_excel_path, backup_path)
 
@@ -197,6 +198,17 @@ class ApplyService:
                 continue
             absolute_path.mkdir(parents=True, exist_ok=False)
             created_relative_paths.append(relative_path)
+
+    def _ensure_excel_writable(self, excel_path: Path) -> None:
+        try:
+            with excel_path.open("r+b"):
+                pass
+        except OSError as exc:
+            raise RuntimeError(
+                "엑셀 파일을 저장할 수 없습니다. "
+                "엑셀 또는 미리보기 프로그램에서 파일이 열려 있다면 닫고 다시 시도해 주세요. "
+                f"({exc})"
+            ) from exc
 
     def _update_hyperlinks(self, excel_path: Path, target_root: Path, parsed_rows: list[ParsedRow]) -> int:
         workbook = load_workbook(excel_path)
