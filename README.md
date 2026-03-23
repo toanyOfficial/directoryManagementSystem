@@ -18,11 +18,17 @@
 
 ## 2. 설치 및 실행
 
-### 개발 환경 실행
+### GUI 실행
 
 ```bash
 python -m pip install -r requirements.txt
-python -m app.main
+python -m app.gui_app
+```
+
+### CLI 사용
+
+```bash
+python -m app.main --help
 ```
 
 ### Windows exe 패키징
@@ -36,7 +42,7 @@ pyinstaller --clean directory_management_system.spec
 ## 3. 사용 방법
 
 1. **엑셀 생성**
-   - 현재 폴더에 기본 원장 파일을 생성합니다.
+   - GUI의 `엑셀 생성` 버튼 또는 CLI의 `--init` 으로 기본 원장 파일을 생성합니다.
    - 기본 파일명은 `directory_master.xlsx` 입니다.
 
 2. **엑셀 선택**
@@ -178,12 +184,14 @@ apply 실행 시 루트 디렉토리 아래 `logs/` 폴더가 생성되며, `app
 - 삭제는 **항상 마지막**에만 수행됩니다.
 - 삭제 대상은 **완전히 빈 폴더만** 허용됩니다.
 - 삭제 후보 중 하나라도 하위 파일/폴더가 있으면 apply는 중단됩니다.
-- apply 중 오류가 나면 가능한 범위에서 롤백을 시도하지만, 파일 시스템 작업은 완전한 원자성을 보장할 수 없습니다.
+- apply 중 오류가 나면 가능한 범위에서 롤백을 시도하지만, 파일 시스템 작업은 운영체제 잠금 상태, Dropbox 동기화 지연, 외부 프로그램 점유, 강제 종료 상황 때문에 완전한 원자성을 보장할 수 없습니다.
 - apply 전에 반드시 dry-run으로 결과를 확인하는 것을 권장합니다.
 
 ## 10. 파일 구성
 
 - `app/main.py`: 앱 진입점
+- `app/gui_app.py`: GUI 실행 진입점
+- `app/cli.py`: CLI 실행 진입점
 - `app/ui/main_window.py`: 메인 GUI
 - `app/controller/main_controller.py`: UI 이벤트 제어
 - `app/services/excel_initializer.py`: 기본 엑셀 생성
@@ -192,3 +200,24 @@ apply 실행 시 루트 디렉토리 아래 `logs/` 폴더가 생성되며, `app
 - `app/services/settings_service.py`: 마지막 사용 경로 저장
 - `app/utils/path_validator.py`: 폴더명 검증
 - `directory_management_system.spec`: PyInstaller 설정
+
+## 11. CLI 예시
+
+### 초기화
+
+```bash
+python -m app.main --init
+python -m app.main --init --file ./sample_master.xlsx
+```
+
+### dry-run
+
+```bash
+python -m app.main --file ./directory_master.xlsx --root /data/project_root --dry-run
+```
+
+### apply
+
+```bash
+python -m app.main --file ./directory_master.xlsx --root /data/project_root --apply
+```

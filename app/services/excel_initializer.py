@@ -34,20 +34,23 @@ class ExcelInitializer:
         self.default_filename = default_filename
 
     def create_template(self, directory: Path) -> ExcelCreationResult:
+        return self.create_template_at(directory / self.default_filename)
+
+    def create_template_at(self, target_path: Path) -> ExcelCreationResult:
         try:
-            target_directory = directory.expanduser().resolve()
+            resolved_target_path = target_path.expanduser().resolve()
         except OSError as exc:
             return ExcelCreationResult(False, f"경로를 해석할 수 없습니다: {exc}")
 
+        target_directory = resolved_target_path.parent
         if not target_directory.exists():
             return ExcelCreationResult(False, f"대상 경로가 존재하지 않습니다: {target_directory}")
 
         if not target_directory.is_dir():
             return ExcelCreationResult(False, f"대상 경로가 폴더가 아닙니다: {target_directory}")
 
-        target_path = target_directory / self.default_filename
-        if target_path.exists():
-            return ExcelCreationResult(False, f"이미 파일이 존재합니다: {target_path}", target_path)
+        if resolved_target_path.exists():
+            return ExcelCreationResult(False, f"이미 파일이 존재합니다: {resolved_target_path}", resolved_target_path)
 
         workbook = Workbook()
         worksheet = workbook.active
@@ -59,11 +62,11 @@ class ExcelInitializer:
         worksheet.freeze_panes = "A2"
 
         try:
-            workbook.save(target_path)
+            workbook.save(resolved_target_path)
         except OSError as exc:
             return ExcelCreationResult(False, f"엑셀 파일 저장에 실패했습니다: {exc}")
 
-        return ExcelCreationResult(True, f"엑셀 파일을 생성했습니다: {target_path}", target_path)
+        return ExcelCreationResult(True, f"엑셀 파일을 생성했습니다: {resolved_target_path}", resolved_target_path)
 
     def _write_headers(self, worksheet: Worksheet) -> None:
         header_fill = PatternFill(fill_type="solid", fgColor="D9EAF7")

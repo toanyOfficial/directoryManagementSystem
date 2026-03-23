@@ -22,6 +22,8 @@ class ApplyResult:
     created_folders: list[str] = field(default_factory=list)
     deleted_folders: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    rollback_actions: list[str] = field(default_factory=list)
+    hyperlink_updated_rows: int = 0
     dry_run_result: DryRunResult | None = None
 
 
@@ -81,6 +83,7 @@ class ApplyService:
         created_relative_paths: list[Path] = []
         deleted_relative_paths: list[Path] = []
         errors: list[str] = []
+        rollback_actions: list[str] = []
         backup_path: Path | None = None
         dry_run_result: DryRunResult | None = None
 
@@ -108,11 +111,16 @@ class ApplyService:
             if dry_run_result.danger_relative_paths:
                 raise RuntimeError("위험 폴더가 존재하여 적용을 중단합니다.")
 
+            self._ensure_empty_delete_candidates(target_root, dry_run_result.delete_relative_paths)
             backup_path = backups_directory / f"{resolved_excel_path.stem}_{timestamp}{resolved_excel_path.suffix}"
             copy2(resolved_excel_path, backup_path)
 
             self._create_directories(target_root, dry_run_result.create_relative_paths, created_relative_paths)
-            self._update_hyperlinks(resolved_excel_path, target_root, dry_run_result.parsed_rows)
+            hyperlink_updated_rows = self._update_hyperlinks(
+                resolved_excel_path,
+                target_root,
+                dry_run_result.parsed_rows,
+            )
             self._ensure_empty_delete_candidates(target_root, dry_run_result.delete_relative_paths)
             self._delete_empty_directories(target_root, dry_run_result.delete_relative_paths, deleted_relative_paths)
 
@@ -126,11 +134,12 @@ class ApplyService:
                 log_path=log_path,
                 created_folders=[self._format_path(path) for path in created_relative_paths],
                 deleted_folders=[self._format_path(path) for path in deleted_relative_paths],
+                hyperlink_updated_rows=hyperlink_updated_rows,
                 dry_run_result=post_apply_result,
             )
         except Exception as exc:
             errors.append(str(exc))
-            rollback_errors = self._rollback(
+            rollback_actions, rollback_errors = self._rollback(
                 excel_path=resolved_excel_path,
                 backup_path=backup_path,
                 target_root=target_root,
@@ -148,6 +157,7 @@ class ApplyService:
                 created_folders=[self._format_path(path) for path in created_relative_paths],
                 deleted_folders=[self._format_path(path) for path in deleted_relative_paths],
                 errors=errors,
+                rollback_actions=rollback_actions,
                 dry_run_result=dry_run_result,
             )
 
@@ -168,6 +178,8 @@ class ApplyService:
                 created_folders=result.created_folders,
                 deleted_folders=result.deleted_folders,
                 errors=[*result.errors, *log_errors],
+                rollback_actions=result.rollback_actions,
+                hyperlink_updated_rows=result.hyperlink_updated_rows,
                 dry_run_result=result.dry_run_result,
             )
 
@@ -186,7 +198,7 @@ class ApplyService:
             absolute_path.mkdir(parents=True, exist_ok=False)
             created_relative_paths.append(relative_path)
 
-    def _update_hyperlinks(self, excel_path: Path, target_root: Path, parsed_rows: list[ParsedRow]) -> None:
+    def _update_hyperlinks(self, excel_path: Path, target_root: Path, parsed_rows: list[ParsedRow]) -> int:
         workbook = load_workbook(excel_path)
         try:
             worksheet = workbook.active
@@ -198,6 +210,7 @@ class ApplyService:
             workbook.save(excel_path)
         finally:
             workbook.close()
+        return len(parsed_rows)
 
     def _ensure_empty_delete_candidates(self, target_root: Path, relative_paths: list[Path]) -> None:
         for relative_path in relative_paths:
@@ -229,18 +242,21 @@ class ApplyService:
         target_root: Path,
         created_relative_paths: list[Path],
         deleted_relative_paths: list[Path],
-    ) -> list[str]:
+    ) -> tuple[list[str], list[str]]:
+        rollback_actions: list[str] = []
         rollback_errors: list[str] = []
 
         if backup_path is not None and backup_path.exists():
             try:
                 copy2(backup_path, excel_path)
+                rollback_actions.append(f"엑셀 백업을 원본으로 복원했습니다: {backup_path}")
             except OSError as exc:
                 rollback_errors.append(f"엑셀 복원 실패: {exc}")
 
         for relative_path in sorted(deleted_relative_paths, key=lambda path: (len(path.parts), self._format_path(path))):
             try:
                 (target_root / relative_path).mkdir(parents=True, exist_ok=True)
+                rollback_actions.append(f"삭제한 빈 폴더를 다시 만들었습니다: {self._format_path(relative_path)}")
             except OSError as exc:
                 rollback_errors.append(f"삭제 폴더 복원 실패 ({self._format_path(relative_path)}): {exc}")
 
@@ -253,10 +269,11 @@ class ApplyService:
             try:
                 if absolute_path.exists() and not any(absolute_path.iterdir()):
                     absolute_path.rmdir()
+                    rollback_actions.append(f"생성했던 폴더를 제거했습니다: {self._format_path(relative_path)}")
             except OSError as exc:
                 rollback_errors.append(f"생성 폴더 롤백 실패 ({self._format_path(relative_path)}): {exc}")
 
-        return rollback_errors
+        return rollback_actions, rollback_errors
 
     def _write_log(self, log_path: Path, started_at: datetime, result: ApplyResult) -> list[str]:
         ended_at = datetime.now()
@@ -269,8 +286,11 @@ class ApplyService:
             *self._format_log_items(result.created_folders),
             "삭제 폴더:",
             *self._format_log_items(result.deleted_folders),
+            f"갱신된 하이퍼링크 row 수: {result.hyperlink_updated_rows}",
             "오류:",
             *self._format_log_items(result.errors),
+            "롤백 시도:",
+            *self._format_log_items(result.rollback_actions),
             f"결과: {result.message}",
         ]
 

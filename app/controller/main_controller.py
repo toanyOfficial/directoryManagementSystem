@@ -189,8 +189,14 @@ class MainController:
         for folder in result.deleted_folders:
             self._log(f"삭제 완료: {folder}")
 
+        if result.hyperlink_updated_rows:
+            self._log(f"하이퍼링크 갱신 row 수: {result.hyperlink_updated_rows}")
+
         for error in result.errors:
             self._log(f"오류: {error}")
+
+        for action in result.rollback_actions:
+            self._log(f"롤백 시도: {action}")
 
         self._log(result.message)
 

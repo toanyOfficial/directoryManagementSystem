@@ -5,7 +5,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent
 
 a = Analysis(
-    ["app/main.py"],
+    ["app/gui_app.py"],
     pathex=[str(project_root)],
     binaries=[],
     datas=[],
