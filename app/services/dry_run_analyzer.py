@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from app.services.excel_schema import EXCEL_HEADERS
 from app.utils.path_validator import FolderNameValidator
 
-_SYSTEM_DIRECTORIES = {"logs", "backups"}
+_SYSTEM_DIRECTORIES = {"logs", "backups", "_internal"}
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,14 @@ class DryRunAnalyzer:
 
             for row_number in range(2, worksheet.max_row + 1):
                 values = [worksheet.cell(row=row_number, column=index).value for index in range(1, 6)]
-                normalized_values = [str(value).strip() if value is not None else "" for value in values]
+                normalized_values: list[str] = []
+                for index, value in enumerate(values):
+                    if value is None:
+                        normalized_values.append("")
+                    elif index < 4:
+                        normalized_values.append(FolderNameValidator.normalize(str(value)))
+                    else:
+                        normalized_values.append(str(value).strip())
 
                 if not any(normalized_values):
                     continue

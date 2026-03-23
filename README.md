@@ -93,7 +93,7 @@ pyinstaller --clean directory_management_system.spec
 
 - 숫자
 - 한글
-- 영어
+- 영문 소문자
 - `_`
 - `.`
 
@@ -103,7 +103,7 @@ pyinstaller --clean directory_management_system.spec
 - Windows 예약어 금지 (`CON`, `PRN`, `AUX`, `NUL`, `COM1` 등)
 - 마지막 글자 `.` 금지
 
-유효성 검사는 Python 로직을 최종 기준으로 합니다.
+엑셀 템플릿에는 영문 소문자 / 공백 금지 규칙을 위한 Data Validation이 포함되며, 프로그램 처리 단계에서도 영문은 소문자 기준으로 해석하고 공백은 제거한 뒤 최종 검증합니다.
 
 ## 6. dry-run 설명
 
@@ -126,7 +126,7 @@ dry-run은 엑셀을 실제로 수정하거나 폴더를 바꾸지 않고 결과
 - **위험 폴더**: 삭제 후보이면서 하위 파일/폴더가 있는 폴더
 - **row 오류**: 필수값 누락, 이름 규칙 위반, 중간 누락, 중복 구조 등
 
-`logs/`, `backups/` 폴더는 시스템 관리용 폴더이므로 dry-run 비교에서 제외합니다.
+`logs/`, `backups/`, `_internal/` 폴더는 시스템 관리용 폴더이므로 dry-run 비교와 위험 폴더 판단에서 제외합니다.
 
 ## 7. apply 설명
 

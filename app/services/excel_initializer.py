@@ -89,6 +89,7 @@ class ExcelInitializer:
                 type="custom",
                 formula1=(
                     f'=AND({column_letter}2<>"",'
+                    f'EXACT({column_letter}2,LOWER({column_letter}2)),'
                     f'ISERROR(SEARCH(" ",{column_letter}2)),'
                     f'RIGHT({column_letter}2,1)<>".")'
                 ),
@@ -96,11 +97,11 @@ class ExcelInitializer:
                 showErrorMessage=True,
                 errorTitle="입력 제한",
                 error=(
-                    "공백 없이 입력하고 마지막 글자에 '.'을 사용할 수 없습니다. "
+                    "영문은 소문자로 입력하고, 공백 없이 입력해야 하며, 마지막 글자에 '.'을 사용할 수 없습니다. "
                     "최종 유효성 검사는 프로그램 기준을 따릅니다."
                 ),
                 promptTitle="입력 규칙",
-                prompt="숫자/한글/영어/언더스코어/점만 사용하는 것을 권장합니다.",
+                prompt="숫자/한글/영문 소문자/언더스코어/점만 사용하고 공백은 입력하지 마세요.",
             )
             validation.add(f"{column_letter}2:{column_letter}{_MAX_EXCEL_ROWS}")
             worksheet.add_data_validation(validation)
