@@ -20,7 +20,8 @@ def main() -> int:
     analyzer = DryRunAnalyzer()
     apply_service = ApplyService(analyzer)
     settings_service = SettingsService()
-    MainController(window, initializer, analyzer, apply_service, settings_service)
+    controller = MainController(window, initializer, analyzer, apply_service, settings_service)
+    window.controller = controller
 
     window.show()
     return app.exec()
