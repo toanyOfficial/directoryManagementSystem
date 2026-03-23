@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -12,8 +13,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QTabWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -22,7 +23,7 @@ from app.services.dry_run_analyzer import DryRunResult, RowError
 
 
 class MainWindow(QMainWindow):
-    """Main view for the stage-3 application."""
+    """Main view for the stage-4 application."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -39,25 +40,50 @@ class MainWindow(QMainWindow):
 
         self.create_excel_button = QPushButton("엑셀 생성")
         self.select_excel_button = QPushButton("엑셀 선택")
+        self.select_root_button = QPushButton("루트 선택")
         self.dry_run_button = QPushButton("미리보기 (dry-run)")
         self.apply_button = QPushButton("적용 (apply)")
         self.exit_button = QPushButton("종료")
 
+        self.create_excel_button.setMinimumWidth(110)
+        self.select_excel_button.setMinimumWidth(110)
+        self.select_root_button.setMinimumWidth(110)
+        self.dry_run_button.setMinimumWidth(150)
+        self.apply_button.setMinimumWidth(120)
+
         button_layout.addWidget(self.create_excel_button)
         button_layout.addWidget(self.select_excel_button)
+        button_layout.addWidget(self.select_root_button)
         button_layout.addWidget(self.dry_run_button)
         button_layout.addWidget(self.apply_button)
         button_layout.addStretch(1)
         button_layout.addWidget(self.exit_button)
 
-        path_label = QLabel("선택된 엑셀 파일")
+        path_group = QGroupBox("입력 경로")
+        path_layout = QGridLayout(path_group)
+        path_layout.setHorizontalSpacing(8)
+        path_layout.setVerticalSpacing(8)
+
+        path_label = QLabel("엑셀 파일")
         self.selected_path_edit = QLineEdit()
         self.selected_path_edit.setReadOnly(True)
         self.selected_path_edit.setPlaceholderText("아직 선택된 엑셀 파일이 없습니다.")
+        self.selected_path_edit.setClearButtonEnabled(False)
+
+        root_label = QLabel("루트 디렉토리")
+        self.root_directory_edit = QLineEdit()
+        self.root_directory_edit.setReadOnly(True)
+        self.root_directory_edit.setPlaceholderText("미선택 시 엑셀 파일이 있는 폴더를 기본 루트로 사용합니다.")
+
+        path_layout.addWidget(path_label, 0, 0)
+        path_layout.addWidget(self.selected_path_edit, 0, 1)
+        path_layout.addWidget(root_label, 1, 0)
+        path_layout.addWidget(self.root_directory_edit, 1, 1)
 
         status_group = QGroupBox("진행 상태")
         status_layout = QVBoxLayout(status_group)
         self.status_message_label = QLabel("대기")
+        self.status_message_label.setWordWrap(True)
         status_layout.addWidget(self.status_message_label)
 
         summary_group = QGroupBox("분석 요약")
@@ -101,18 +127,28 @@ class MainWindow(QMainWindow):
         self.result_tabs.addTab(self.row_errors_output, "row 오류")
         results_layout.addWidget(self.result_tabs)
 
-        log_label = QLabel("로그")
-        self.log_output = QTextEdit()
+        log_group = QGroupBox("실행 로그")
+        log_layout = QVBoxLayout(log_group)
+        self.log_output = self._create_result_box()
         self.log_output.setReadOnly(True)
+        self.log_output.setMaximumBlockCount(2000)
+        log_layout.addWidget(self.log_output)
+
+        lower_layout = QHBoxLayout()
+        lower_layout.setSpacing(12)
+        lower_layout.addWidget(results_group, stretch=3)
+        lower_layout.addWidget(log_group, stretch=2)
+
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
 
         main_layout.addLayout(button_layout)
-        main_layout.addWidget(path_label)
-        main_layout.addWidget(self.selected_path_edit)
+        main_layout.addWidget(path_group)
         main_layout.addWidget(status_group)
+        main_layout.addWidget(separator)
         main_layout.addWidget(summary_group)
-        main_layout.addWidget(results_group, stretch=1)
-        main_layout.addWidget(log_label)
-        main_layout.addWidget(self.log_output, stretch=1)
+        main_layout.addLayout(lower_layout, stretch=1)
 
         self.setCentralWidget(central_widget)
         self.clear_analysis_result()
@@ -121,7 +157,12 @@ class MainWindow(QMainWindow):
         self.selected_path_edit.setText(str(path) if path else "")
 
     def append_log(self, message: str) -> None:
-        self.log_output.append(message)
+        self.log_output.appendPlainText(message)
+        scrollbar = self.log_output.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def set_root_directory(self, path: Path | None) -> None:
+        self.root_directory_edit.setText(str(path) if path else "")
 
     def clear_analysis_result(self) -> None:
         self.total_rows_value.setText("-")
@@ -173,6 +214,10 @@ class MainWindow(QMainWindow):
         output = QPlainTextEdit()
         output.setReadOnly(True)
         output.setLineWrapMode(QPlainTextEdit.NoWrap)
+        output.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        font = QFont("Consolas")
+        font.setStyleHint(QFont.Monospace)
+        output.setFont(font)
         return output
 
     def _create_value_label(self, initial_text: str) -> QLabel:

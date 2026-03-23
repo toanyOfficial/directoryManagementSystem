@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import os
 from pathlib import Path, PureWindowsPath
 from shutil import copy2
 
@@ -30,7 +31,7 @@ class ApplyService:
     def __init__(self, dry_run_analyzer: DryRunAnalyzer) -> None:
         self.dry_run_analyzer = dry_run_analyzer
 
-    def apply(self, excel_path: Path) -> ApplyResult:
+    def apply(self, excel_path: Path, root_directory: Path | None = None) -> ApplyResult:
         started_at = datetime.now()
         timestamp = started_at.strftime("%Y%m%d_%H%M%S")
 
@@ -39,12 +40,40 @@ class ApplyService:
         except OSError as exc:
             return ApplyResult(
                 success=False,
-                message=f"엑셀 경로를 해석할 수 없습니다: {exc}",
+                message=f"엑셀 경로를 확인할 수 없습니다: {exc}",
                 status_message="적용 실패",
-                errors=[f"엑셀 경로를 해석할 수 없습니다: {exc}"],
+                errors=[f"엑셀 경로를 확인할 수 없습니다: {exc}"],
             )
 
-        target_root = resolved_excel_path.parent
+        if root_directory is None:
+            target_root = resolved_excel_path.parent
+        else:
+            try:
+                target_root = root_directory.expanduser().resolve()
+            except OSError as exc:
+                return ApplyResult(
+                    success=False,
+                    message=f"루트 디렉토리를 확인할 수 없습니다: {exc}",
+                    status_message="적용 실패",
+                    errors=[f"루트 디렉토리를 확인할 수 없습니다: {exc}"],
+                )
+
+            if not target_root.exists():
+                return ApplyResult(
+                    success=False,
+                    message=f"선택한 루트 디렉토리가 존재하지 않습니다: {target_root}",
+                    status_message="적용 실패",
+                    errors=[f"선택한 루트 디렉토리가 존재하지 않습니다: {target_root}"],
+                )
+
+            if not target_root.is_dir():
+                return ApplyResult(
+                    success=False,
+                    message=f"선택한 루트 경로가 폴더가 아닙니다: {target_root}",
+                    status_message="적용 실패",
+                    errors=[f"선택한 루트 경로가 폴더가 아닙니다: {target_root}"],
+                )
+
         logs_directory = target_root / "logs"
         backups_directory = target_root / "backups"
         log_path = logs_directory / f"apply_{timestamp}.log"
@@ -61,7 +90,7 @@ class ApplyService:
         except OSError as exc:
             return ApplyResult(
                 success=False,
-                message=f"로그 또는 백업 폴더를 준비할 수 없습니다: {exc}",
+                message=f"로그 또는 백업 폴더를 준비할 수 없습니다. 접근 권한을 확인해 주세요. ({exc})",
                 status_message="적용 실패",
                 target_root=target_root,
                 log_path=log_path,
@@ -69,7 +98,7 @@ class ApplyService:
             )
 
         try:
-            dry_run_result = self.dry_run_analyzer.analyze(resolved_excel_path)
+            dry_run_result = self.dry_run_analyzer.analyze(resolved_excel_path, target_root)
             if not dry_run_result.success:
                 raise RuntimeError(dry_run_result.fatal_error or "사전 검증에 실패했습니다.")
 
@@ -83,11 +112,11 @@ class ApplyService:
             copy2(resolved_excel_path, backup_path)
 
             self._create_directories(target_root, dry_run_result.create_relative_paths, created_relative_paths)
-            self._update_hyperlinks(resolved_excel_path, dry_run_result.parsed_rows)
+            self._update_hyperlinks(resolved_excel_path, target_root, dry_run_result.parsed_rows)
             self._ensure_empty_delete_candidates(target_root, dry_run_result.delete_relative_paths)
             self._delete_empty_directories(target_root, dry_run_result.delete_relative_paths, deleted_relative_paths)
 
-            post_apply_result = self.dry_run_analyzer.analyze(resolved_excel_path)
+            post_apply_result = self.dry_run_analyzer.analyze(resolved_excel_path, target_root)
             result = ApplyResult(
                 success=True,
                 message="적용이 완료되었습니다.",
@@ -157,13 +186,14 @@ class ApplyService:
             absolute_path.mkdir(parents=True, exist_ok=False)
             created_relative_paths.append(relative_path)
 
-    def _update_hyperlinks(self, excel_path: Path, parsed_rows: list[ParsedRow]) -> None:
+    def _update_hyperlinks(self, excel_path: Path, target_root: Path, parsed_rows: list[ParsedRow]) -> None:
         workbook = load_workbook(excel_path)
         try:
             worksheet = workbook.active
             for parsed_row in parsed_rows:
                 cell = worksheet.cell(row=parsed_row.row_number, column=4)
-                cell.hyperlink = self._format_path(parsed_row.relative_path)
+                hyperlink_target = os.path.relpath(target_root / parsed_row.relative_path, start=excel_path.parent)
+                cell.hyperlink = str(PureWindowsPath(hyperlink_target))
                 cell.style = "Hyperlink"
             workbook.save(excel_path)
         finally:

@@ -56,22 +56,36 @@ class DryRunResult:
 class DryRunAnalyzer:
     """Analyze Excel rows and compare them with the actual directory structure."""
 
-    def analyze(self, excel_path: Path) -> DryRunResult:
+    def analyze(self, excel_path: Path, root_directory: Path | None = None) -> DryRunResult:
         try:
             resolved_excel_path = excel_path.expanduser().resolve()
         except OSError as exc:
-            return self._fatal_result(f"엑셀 경로를 해석할 수 없습니다: {exc}")
+            return self._fatal_result(f"엑셀 경로를 확인할 수 없습니다. 경로를 다시 선택해 주세요. ({exc})")
 
         if not resolved_excel_path.exists():
-            return self._fatal_result(f"엑셀 파일이 존재하지 않습니다: {resolved_excel_path}")
+            return self._fatal_result(f"선택한 엑셀 파일을 찾을 수 없습니다: {resolved_excel_path}")
 
         if resolved_excel_path.suffix.lower() != ".xlsx":
-            return self._fatal_result("지원하지 않는 파일 형식입니다. .xlsx 파일만 선택할 수 있습니다.")
+            return self._fatal_result("지원하지 않는 파일 형식입니다. '.xlsx' 파일을 선택해 주세요.")
+
+        if root_directory is None:
+            target_root = resolved_excel_path.parent
+        else:
+            try:
+                target_root = root_directory.expanduser().resolve()
+            except OSError as exc:
+                return self._fatal_result(f"루트 디렉토리를 확인할 수 없습니다. 경로를 다시 선택해 주세요. ({exc})")
+
+            if not target_root.exists():
+                return self._fatal_result(f"선택한 루트 디렉토리가 존재하지 않습니다: {target_root}")
+
+            if not target_root.is_dir():
+                return self._fatal_result(f"선택한 루트 경로가 폴더가 아닙니다: {target_root}")
 
         try:
             workbook = load_workbook(resolved_excel_path, data_only=True)
         except Exception as exc:
-            return self._fatal_result(f"엑셀 파일을 읽을 수 없습니다: {exc}")
+            return self._fatal_result(f"엑셀 파일을 읽는 중 문제가 발생했습니다. 파일이 열려 있는지 확인해 주세요. ({exc})")
 
         try:
             worksheet = workbook.active
@@ -113,7 +127,6 @@ class DryRunAnalyzer:
         finally:
             workbook.close()
 
-        target_root = resolved_excel_path.parent
         expected_directories = self._build_expected_directories(parsed_rows)
         actual_directories = self._scan_actual_directories(target_root)
 
