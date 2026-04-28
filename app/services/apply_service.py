@@ -215,7 +215,7 @@ class ApplyService:
         try:
             worksheet = workbook.active
             for parsed_row in parsed_rows:
-                cell = worksheet.cell(row=parsed_row.row_number, column=4)
+                cell = worksheet.cell(row=parsed_row.row_number, column=parsed_row.hyperlink_column)
                 hyperlink_target = os.path.relpath(target_root / parsed_row.relative_path, start=excel_path.parent)
                 cell.hyperlink = str(PureWindowsPath(hyperlink_target))
                 cell.style = "Hyperlink"
