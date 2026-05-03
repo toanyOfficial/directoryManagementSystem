@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import subprocess
 
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from app.services.apply_service import ApplyService
 from app.services.dry_run_analyzer import DryRunAnalyzer
@@ -43,6 +44,7 @@ class MainController:
         self.view.dry_run_button.clicked.connect(self.run_dry_run)
         self.view.apply_button.clicked.connect(self.apply_changes)
         self.view.exit_button.clicked.connect(self.view.close)
+        self.view.set_item_click_handlers(self._handle_delete_item_click, self._handle_review_item_click)
 
     def _restore_settings(self) -> None:
         settings_data = self.settings_service.load()
@@ -160,7 +162,7 @@ class MainController:
         self._log(f"오류 row 수: {result.error_rows}")
         self._log(f"생성 예정 개수: {result.create_count}")
         self._log(f"삭제 후보 개수: {result.delete_count}")
-        self._log(f"위험 폴더 개수: {result.danger_count}")
+        self._log(f"확인필요 개수: {result.review_needed_count}")
         self._log(f"최종 판정: {'가능' if result.is_applicable else '불가'}")
 
     def apply_changes(self) -> None:
@@ -210,3 +212,40 @@ class MainController:
     def _log(self, message: str) -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.view.append_log(f"[{timestamp}] {message}")
+
+    def _handle_delete_item_click(self, relative_path: str) -> None:
+        self._open_path_and_copy_relative_path(relative_path)
+
+    def _handle_review_item_click(self, relative_path: str) -> None:
+        self._open_path_and_copy_relative_path(relative_path)
+
+    def _open_path_and_copy_relative_path(self, relative_path: str) -> None:
+        self._log(f"클릭된 relative_path: {relative_path}")
+        if self.root_directory is None:
+            self._log("루트 디렉토리가 없어 클릭 항목 경로를 열 수 없습니다.")
+            return
+
+        absolute_path = self.root_directory / Path(relative_path)
+        try:
+            # 기존 정상 동작인 Windows 탐색기 열기는 유지한다.
+            subprocess.Popen(["explorer", str(absolute_path)])
+        except Exception as exc:
+            self._log(f"탐색기 열기 실패(무시): {exc}")
+
+        try:
+            # 클립보드에는 절대경로가 아닌 상대경로 문자열만 복사하고, 검색 불일치 방지를 위해 정규화한다.
+            clean_relative_path = (
+                str(relative_path)
+                .strip()
+                .replace("\r", "")
+                .replace("\n", "")
+                .replace("\u200b", "")
+                .replace("\ufeff", "")
+                .replace("/", "\\")
+            )
+            clipboard = QApplication.clipboard()
+            clipboard.setText(clean_relative_path)
+            self._log(f"상대경로를 클립보드에 복사했습니다: {clean_relative_path}")
+        except Exception as exc:
+            self._log(f"클립보드 복사 실패(무시): {exc}")
+
