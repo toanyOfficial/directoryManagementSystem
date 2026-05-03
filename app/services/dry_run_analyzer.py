@@ -22,6 +22,7 @@ class ParsedRow:
     row_number: int
     path_parts: tuple[str, ...]
     hyperlink_column: int
+    skip_children: bool
 
     @property
     def relative_path(self) -> Path:
@@ -128,12 +129,14 @@ class DryRunAnalyzer:
                     continue
 
                 depth_values = normalized_values[:depth_column_count]
+                skip_children = str(normalized_values[depth_column_count]).strip().upper() == "TRUE"
                 path_parts = tuple(value for value in depth_values if value)
                 hyperlink_column = self._last_value_index(depth_values) + 1
                 parsed_row = ParsedRow(
                     row_number=row_number,
                     path_parts=path_parts,
                     hyperlink_column=hyperlink_column,
+                    skip_children=skip_children,
                 )
                 if parsed_row.relative_path in seen_paths:
                     row_errors.append(RowError(row_number, f"중복 구조입니다: {parsed_row.display_path}"))
@@ -170,9 +173,8 @@ class DryRunAnalyzer:
         # - leaf 바로 아래 하위 폴더가 1~5개인 경우만 표시
         review_needed = self._build_review_needed_items(
             target_root=target_root,
-            leaf_directories=leaf_directories,
+            parsed_rows=parsed_rows,
             expected_directories=expected_directories,
-            max_child_directory_count=5,
         )
 
         return DryRunResult(
@@ -253,12 +255,15 @@ class DryRunAnalyzer:
     def _build_review_needed_items(
         self,
         target_root: Path,
-        leaf_directories: set[Path],
+        parsed_rows: list[ParsedRow],
         expected_directories: set[Path],
-        max_child_directory_count: int,
     ) -> list[dict[str, object]]:
         review_needed: list[dict[str, object]] = []
-        for leaf_path in sorted(leaf_directories, key=self._sort_key):
+        for parsed_row in sorted(parsed_rows, key=lambda row: self._sort_key(row.relative_path)):
+            leaf_path = parsed_row.relative_path
+            # E열(하위폴더생략)이 TRUE이면 확인필요에서 제외한다.
+            if parsed_row.skip_children:
+                continue
             absolute_leaf_path = target_root / leaf_path
             if not absolute_leaf_path.exists() or not absolute_leaf_path.is_dir():
                 continue
@@ -272,7 +277,7 @@ class DryRunAnalyzer:
                 undefined_child_directories.append(child_directory)
 
             undefined_child_count = len(undefined_child_directories)
-            if undefined_child_count == 0 or undefined_child_count > max_child_directory_count:
+            if undefined_child_count == 0:
                 continue
 
             sample_children = [child.name for child in undefined_child_directories[:3]]
