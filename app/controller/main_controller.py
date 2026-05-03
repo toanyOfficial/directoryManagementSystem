@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+import os
 from pathlib import Path
+import subprocess
 
 from PySide6.QtWidgets import QFileDialog
 
@@ -43,6 +45,7 @@ class MainController:
         self.view.dry_run_button.clicked.connect(self.run_dry_run)
         self.view.apply_button.clicked.connect(self.apply_changes)
         self.view.exit_button.clicked.connect(self.view.close)
+        self.view.set_item_click_handlers(self._handle_delete_item_click, self._handle_review_item_click)
 
     def _restore_settings(self) -> None:
         settings_data = self.settings_service.load()
@@ -160,7 +163,7 @@ class MainController:
         self._log(f"오류 row 수: {result.error_rows}")
         self._log(f"생성 예정 개수: {result.create_count}")
         self._log(f"삭제 후보 개수: {result.delete_count}")
-        self._log(f"위험 폴더 개수: {result.danger_count}")
+        self._log(f"확인필요 개수: {result.review_needed_count}")
         self._log(f"최종 판정: {'가능' if result.is_applicable else '불가'}")
 
     def apply_changes(self) -> None:
@@ -210,3 +213,103 @@ class MainController:
     def _log(self, message: str) -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.view.append_log(f"[{timestamp}] {message}")
+
+    def _handle_delete_item_click(self, relative_path: str) -> None:
+        self._open_path_and_focus_excel(relative_path)
+
+    def _handle_review_item_click(self, relative_path: str) -> None:
+        self._open_path_and_focus_excel(relative_path)
+
+    def _open_path_and_focus_excel(self, relative_path: str) -> None:
+        self._log(f"클릭된 relative_path: {relative_path}")
+        if self.root_directory is None:
+            self._log("루트 디렉토리가 없어 클릭 항목 경로를 열 수 없습니다.")
+            return
+        absolute_path = self.root_directory / Path(relative_path)
+        try:
+            # Windows 탐색기를 절대경로로 연다.
+            subprocess.Popen(["explorer", str(absolute_path)])
+        except Exception as exc:
+            self._log(f"탐색기 열기 실패(무시): {exc}")
+        self._try_focus_excel_row(relative_path)
+
+    def _try_focus_excel_row(self, relative_path: str) -> None:
+        if self.selected_excel_path is None:
+            self._log("엑셀 포커스 이동 건너뜀: 선택된 엑셀 파일이 없습니다.")
+            return
+        self._log(f"설정된 엑셀 파일 경로: {self.selected_excel_path}")
+        try:
+            import win32com.client  # type: ignore
+            from win32com.client import GetActiveObject  # type: ignore
+        except Exception:
+            self._log("Excel COM 연결 실패: win32com 모듈을 불러올 수 없습니다.")
+            return
+        try:
+            excel = GetActiveObject("Excel.Application")
+            self._log("Excel COM 연결 성공")
+        except Exception:
+            self._log("Excel COM 연결 실패: 실행 중인 Excel.Application을 찾지 못했습니다.")
+            return
+
+        opened_workbooks: list[str] = []
+        target_book = None
+        normalized_selected_path = os.path.normcase(os.path.abspath(str(self.selected_excel_path)))
+        for workbook in excel.Workbooks:
+            workbook_path = str(workbook.FullName)
+            opened_workbooks.append(workbook_path)
+            normalized_workbook_path = os.path.normcase(os.path.abspath(workbook_path))
+            if normalized_workbook_path == normalized_selected_path:
+                target_book = workbook
+                break
+        self._log(f"현재 열린 workbook 목록: {opened_workbooks}")
+        if target_book is None:
+            self._log("대상 workbook 발견 실패: 설정된 엑셀 파일이 현재 열려 있지 않습니다.")
+            return
+        self._log("대상 workbook 발견 성공")
+
+        worksheet = target_book.Worksheets(1)
+        target_row = self._find_best_matching_row(worksheet, relative_path)
+        if target_row is None:
+            self._log("엑셀 포커스 이동 실패: 매칭 row를 찾지 못했습니다.")
+            return
+        try:
+            worksheet.Activate()
+            cell = worksheet.Cells(target_row, 1)
+            cell.Select()
+            excel.ActiveWindow.ScrollRow = max(1, target_row - 5)
+            self._log(f"엑셀 포커스 이동 성공: {target_row}행")
+        except Exception:
+            self._log("엑셀 포커스 이동 실패: 셀 선택 또는 스크롤 중 예외가 발생했습니다.")
+            return
+
+    def _find_best_matching_row(self, worksheet, relative_path: str) -> int | None:
+        parts = [part for part in str(relative_path).replace("/", "\\").split("\\") if part][:4]
+        if not parts:
+            return None
+        prefix_candidates = ["\\".join(parts[:index]) for index in range(len(parts), 0, -1)]
+        self._log(f"생성된 prefix 후보 목록: {prefix_candidates}")
+        max_row = int(worksheet.UsedRange.Rows.Count) + 1
+        best_row = None
+        best_score = -1
+        best_depth = -1
+        for row in range(2, max_row + 1):
+            row_values = [str(worksheet.Cells(row, col).Value or "").strip() for col in range(1, 5)]
+            row_parts = [value for value in row_values if value]
+            if row <= 12:
+                row_preview = "\\".join(row_parts) if row_parts else "-"
+                self._log(f"row {row} Depth 경로 예시: {row_preview}")
+            # 완전 prefix 일치 우선: row_parts == relative_path 앞부분
+            if row_parts and parts[: len(row_parts)] == row_parts:
+                score = len(row_parts)
+            else:
+                score = 0
+                for idx, row_value in enumerate(row_values):
+                    if idx >= len(parts) or not row_value or row_value != parts[idx]:
+                        break
+                    score += 1
+            if score > best_score or (score == best_score and len(row_parts) > best_depth):
+                best_score = score
+                best_depth = len(row_parts)
+                best_row = row
+        self._log(f"최종 매칭 row 번호: {best_row}")
+        return best_row if best_score > 0 else None
