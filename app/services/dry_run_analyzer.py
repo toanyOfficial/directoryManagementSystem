@@ -5,7 +5,7 @@ from pathlib import Path, PureWindowsPath
 
 from openpyxl import load_workbook
 
-from app.services.excel_schema import EXCEL_HEADERS
+from app.services.excel_schema import EXCEL_HEADERS, MANAGED_DEPTH_COLUMN_COUNT
 from app.utils.path_validator import FolderNameValidator
 
 _SYSTEM_DIRECTORIES = {"logs", "backups", "_internal"}
@@ -21,6 +21,8 @@ class RowError:
 class ParsedRow:
     row_number: int
     path_parts: tuple[str, ...]
+    hyperlink_column: int
+    skip_children: bool
 
     @property
     def relative_path(self) -> Path:
@@ -41,16 +43,17 @@ class DryRunResult:
     error_rows: int
     create_count: int
     delete_count: int
-    danger_count: int
+    review_needed_count: int
     is_applicable: bool
     create_candidates: list[str] = field(default_factory=list)
     delete_candidates: list[str] = field(default_factory=list)
-    danger_folders: list[str] = field(default_factory=list)
+    review_needed_items: list[str] = field(default_factory=list)
+    review_needed_details: list[dict[str, object]] = field(default_factory=list)
     row_errors: list[RowError] = field(default_factory=list)
     parsed_rows: list[ParsedRow] = field(default_factory=list)
     create_relative_paths: list[Path] = field(default_factory=list)
     delete_relative_paths: list[Path] = field(default_factory=list)
-    danger_relative_paths: list[Path] = field(default_factory=list)
+    review_needed_relative_paths: list[Path] = field(default_factory=list)
 
 
 class DryRunAnalyzer:
@@ -90,7 +93,8 @@ class DryRunAnalyzer:
         try:
             worksheet = workbook.active
             header_values = tuple(
-                str(worksheet.cell(row=1, column=index).value or "").strip() for index in range(1, 6)
+                str(worksheet.cell(row=1, column=index).value or "").strip()
+                for index in range(1, len(EXCEL_HEADERS) + 1)
             )
             if header_values != EXCEL_HEADERS:
                 return self._fatal_result(
@@ -103,13 +107,14 @@ class DryRunAnalyzer:
             seen_paths: set[Path] = set()
             total_rows = 0
 
+            depth_column_count = MANAGED_DEPTH_COLUMN_COUNT
             for row_number in range(2, worksheet.max_row + 1):
-                values = [worksheet.cell(row=row_number, column=index).value for index in range(1, 6)]
+                values = [worksheet.cell(row=row_number, column=index).value for index in range(1, len(EXCEL_HEADERS) + 1)]
                 normalized_values: list[str] = []
                 for index, value in enumerate(values):
                     if value is None:
                         normalized_values.append("")
-                    elif index < 4:
+                    elif index < depth_column_count:
                         normalized_values.append(FolderNameValidator.normalize(str(value)))
                     else:
                         normalized_values.append(str(value).strip())
@@ -118,13 +123,21 @@ class DryRunAnalyzer:
                     continue
 
                 total_rows += 1
-                validation_messages = self._validate_row(normalized_values)
+                validation_messages = self._validate_row(normalized_values, depth_column_count)
                 if validation_messages:
                     row_errors.append(RowError(row_number, "; ".join(validation_messages)))
                     continue
 
-                path_parts = tuple(value for value in normalized_values[:4] if value)
-                parsed_row = ParsedRow(row_number=row_number, path_parts=path_parts)
+                depth_values = normalized_values[:depth_column_count]
+                skip_children = str(normalized_values[depth_column_count]).strip().upper() == "TRUE"
+                path_parts = tuple(value for value in depth_values if value)
+                hyperlink_column = self._last_value_index(depth_values) + 1
+                parsed_row = ParsedRow(
+                    row_number=row_number,
+                    path_parts=path_parts,
+                    hyperlink_column=hyperlink_column,
+                    skip_children=skip_children,
+                )
                 if parsed_row.relative_path in seen_paths:
                     row_errors.append(RowError(row_number, f"중복 구조입니다: {parsed_row.display_path}"))
                     continue
@@ -135,19 +148,34 @@ class DryRunAnalyzer:
             workbook.close()
 
         expected_directories = self._build_expected_directories(parsed_rows)
-        actual_directories = self._scan_actual_directories(target_root)
+        depth_column_count = MANAGED_DEPTH_COLUMN_COUNT
+        actual_directories = self._scan_actual_directories(target_root, depth_column_count)
 
         create_candidates = sorted(expected_directories - actual_directories, key=self._sort_key)
-        delete_candidates = sorted(actual_directories - expected_directories, key=self._sort_key)
-        danger_folders = []
-        for relative_path in delete_candidates:
-            candidate_path = target_root / relative_path
-            try:
-                has_children = any(candidate_path.iterdir())
-            except OSError:
-                has_children = True
-            if has_children:
-                danger_folders.append(relative_path)
+        leaf_directories = {parsed_row.relative_path for parsed_row in parsed_rows}
+
+        # 삭제 후보 판단 로직
+        # 1) expected에 없는 실제 폴더
+        # 2) 관리 depth(현재 Depth1~Depth4) 이내
+        # 3) 부모가 leaf_directories인 경우 제외 (leaf 아래 데이터 구조 보호)
+        delete_candidates = sorted(
+            self._build_delete_candidates(
+                actual_directories=actual_directories,
+                expected_directories=expected_directories,
+                leaf_directories=leaf_directories,
+                managed_depth=depth_column_count,
+            ),
+            key=self._sort_key,
+        )
+
+        # 확인필요 판단 로직
+        # - 엑셀 leaf 경로가 실제로 존재하고
+        # - leaf 바로 아래 하위 폴더가 1~5개인 경우만 표시
+        review_needed = self._build_review_needed_items(
+            target_root=target_root,
+            parsed_rows=parsed_rows,
+            expected_directories=expected_directories,
+        )
 
         return DryRunResult(
             success=True,
@@ -158,37 +186,37 @@ class DryRunAnalyzer:
             error_rows=len(row_errors),
             create_count=len(create_candidates),
             delete_count=len(delete_candidates),
-            danger_count=len(danger_folders),
-            is_applicable=(len(row_errors) == 0 and len(danger_folders) == 0),
+            review_needed_count=len(review_needed),
+            # apply 차단 기준: row 오류 또는 삭제 후보 존재
+            is_applicable=(len(row_errors) == 0 and len(delete_candidates) == 0),
             create_candidates=[self._format_path(path) for path in create_candidates],
             delete_candidates=[self._format_path(path) for path in delete_candidates],
-            danger_folders=[self._format_path(path) for path in danger_folders],
+            review_needed_items=[item["display"] for item in review_needed],
+            review_needed_details=review_needed,
             row_errors=row_errors,
             parsed_rows=parsed_rows,
             create_relative_paths=create_candidates,
             delete_relative_paths=delete_candidates,
-            danger_relative_paths=danger_folders,
+            review_needed_relative_paths=[item["path"] for item in review_needed],
         )
 
-    def _validate_row(self, row_values: list[str]) -> list[str]:
-        major, middle, minor, task, _note = row_values
+    def _validate_row(self, row_values: list[str], depth_column_count: int) -> list[str]:
+        depth_values = row_values[:depth_column_count]
         errors: list[str] = []
 
-        if not major:
-            errors.append("대분류는 필수입니다.")
+        if not depth_values[0]:
+            errors.append("Depth1은 필수입니다.")
 
-        if not task:
-            errors.append("업무는 필수입니다.")
+        seen_empty = False
+        for index, value in enumerate(depth_values, start=1):
+            if not value:
+                seen_empty = True
+                continue
+            if seen_empty:
+                errors.append("중간 누락 구조는 허용되지 않습니다.")
+                break
 
-        if not middle and minor:
-            errors.append("중간 누락 구조는 허용되지 않습니다.")
-
-        for field_name, value in (
-            ("대분류", major),
-            ("중분류", middle),
-            ("소분류", minor),
-            ("업무", task),
-        ):
+            field_name = f"Depth{index}"
             if not value:
                 continue
             validation_result = FolderNameValidator.validate(value)
@@ -206,13 +234,86 @@ class DryRunAnalyzer:
                 expected_directories.add(current_path)
         return expected_directories
 
-    def _scan_actual_directories(self, target_root: Path) -> set[Path]:
+    def _build_delete_candidates(
+        self,
+        actual_directories: set[Path],
+        expected_directories: set[Path],
+        leaf_directories: set[Path],
+        managed_depth: int,
+    ) -> set[Path]:
+        delete_candidates: set[Path] = set()
+        for actual_path in actual_directories:
+            if actual_path in expected_directories:
+                continue
+            if len(actual_path.parts) > managed_depth:
+                continue
+            if actual_path.parent in leaf_directories:
+                continue
+            delete_candidates.add(actual_path)
+        return delete_candidates
+
+    def _build_review_needed_items(
+        self,
+        target_root: Path,
+        parsed_rows: list[ParsedRow],
+        expected_directories: set[Path],
+    ) -> list[dict[str, object]]:
+        review_needed: list[dict[str, object]] = []
+        for parsed_row in sorted(parsed_rows, key=lambda row: self._sort_key(row.relative_path)):
+            leaf_path = parsed_row.relative_path
+            # Depth4 leaf 아래는 5depth 이상 자유 영역이므로 확인필요 검사에서 무조건 제외한다.
+            if len(leaf_path.parts) >= MANAGED_DEPTH_COLUMN_COUNT:
+                continue
+            # E열(하위폴더생략)이 TRUE이면 확인필요에서 제외한다.
+            if parsed_row.skip_children:
+                continue
+            absolute_leaf_path = target_root / leaf_path
+            if not absolute_leaf_path.exists() or not absolute_leaf_path.is_dir():
+                continue
+            # leaf 바로 아래 하위 폴더만 집계한다.
+            child_directories = self._list_child_directories(absolute_leaf_path)
+            undefined_child_directories = []
+            for child_directory in child_directories:
+                relative_child_path = (leaf_path / child_directory.name)
+                if relative_child_path in expected_directories:
+                    continue
+                undefined_child_directories.append(child_directory)
+
+            undefined_child_count = len(undefined_child_directories)
+            if undefined_child_count == 0:
+                continue
+
+            sample_children = [child.name for child in undefined_child_directories[:3]]
+            display = (
+                f"{self._format_path(leaf_path)} "
+                f"(미정의 하위폴더 {undefined_child_count}개: {', '.join(sample_children)})"
+            )
+            review_needed.append(
+                {
+                    "path": leaf_path,
+                    "relative_path": self._format_path(leaf_path),
+                    "child_count": undefined_child_count,
+                    "sample_children": sample_children,
+                    "display": display,
+                }
+            )
+        return review_needed
+
+    def _list_child_directories(self, directory_path: Path) -> list[Path]:
+        try:
+            return sorted([child for child in directory_path.iterdir() if child.is_dir()], key=lambda path: path.name)
+        except OSError:
+            return []
+
+    def _scan_actual_directories(self, target_root: Path, max_depth: int) -> set[Path]:
         actual_directories: set[Path] = set()
         for path in target_root.rglob("*"):
             if not path.is_dir():
                 continue
             relative_path = path.relative_to(target_root)
             if relative_path.parts and relative_path.parts[0] in _SYSTEM_DIRECTORIES:
+                continue
+            if len(relative_path.parts) > max_depth:
                 continue
             actual_directories.add(relative_path)
         return actual_directories
@@ -222,6 +323,12 @@ class DryRunAnalyzer:
 
     def _format_path(self, path: Path) -> str:
         return str(PureWindowsPath(*path.parts))
+
+    def _last_value_index(self, values: list[str]) -> int:
+        for index in range(len(values) - 1, -1, -1):
+            if values[index]:
+                return index
+        return 0
 
     def _fatal_result(self, message: str) -> DryRunResult:
         return DryRunResult(
@@ -233,6 +340,6 @@ class DryRunAnalyzer:
             error_rows=0,
             create_count=0,
             delete_count=0,
-            danger_count=0,
+            review_needed_count=0,
             is_applicable=False,
         )
