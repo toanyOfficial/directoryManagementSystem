@@ -5,6 +5,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.formatting.rule import FormulaRule
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -15,7 +16,9 @@ _COLUMN_WIDTHS: dict[str, float] = {
     "B": 20,
     "C": 20,
     "D": 28,
-    "E": 36,
+    "E": 18,
+    "F": 36,
+    "G": 44,
 }
 _MAX_EXCEL_ROWS = 1048576
 
@@ -59,6 +62,7 @@ class ExcelInitializer:
         self._write_headers(worksheet)
         self._apply_column_widths(worksheet)
         self._apply_data_validation(worksheet)
+        self._apply_skip_column_visibility_rule(worksheet)
         worksheet.freeze_panes = "A2"
 
         try:
@@ -84,6 +88,7 @@ class ExcelInitializer:
             worksheet.column_dimensions[column_letter].width = width
 
     def _apply_data_validation(self, worksheet: Worksheet) -> None:
+        # A~D 열은 기존과 동일하게 custom 수식 기반 validation을 유지한다.
         for column_letter in ("A", "B", "C", "D"):
             validation = DataValidation(
                 type="custom",
@@ -105,3 +110,26 @@ class ExcelInitializer:
             )
             validation.add(f"{column_letter}2:{column_letter}{_MAX_EXCEL_ROWS}")
             worksheet.add_data_validation(validation)
+
+        # E 열은 별도의 validation 객체로 TRUE/FALSE 목록만 허용한다.
+        e_validation = DataValidation(
+            type="list",
+            formula1='"TRUE,FALSE"',
+            allow_blank=True,
+            showErrorMessage=True,
+            errorTitle="입력 제한",
+            error="TRUE 또는 FALSE만 입력 가능합니다.",
+            promptTitle="입력 규칙",
+            prompt="TRUE(하위폴더 무시), FALSE(검사)",
+        )
+        e_validation.add(f"E2:E{_MAX_EXCEL_ROWS}")
+        worksheet.add_data_validation(e_validation)
+
+    def _apply_skip_column_visibility_rule(self, worksheet: Worksheet) -> None:
+        # E열에서 FALSE 값은 삭제하지 않고 "보이지 않게" 처리하기 위해 조건부 서식을 적용한다.
+        # EXACT($E2,"FALSE")가 참일 때 글자색을 흰색으로 바꿔 기본 배경(흰색)에서 숨김 효과를 낸다.
+        false_hidden_rule = FormulaRule(
+            formula=['EXACT($E2,"FALSE")'],
+            font=Font(color="FFFFFF"),
+        )
+        worksheet.conditional_formatting.add(f"E2:E{_MAX_EXCEL_ROWS}", false_hidden_rule)
