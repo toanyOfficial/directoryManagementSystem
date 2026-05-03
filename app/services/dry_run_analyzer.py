@@ -143,7 +143,8 @@ class DryRunAnalyzer:
             workbook.close()
 
         expected_directories = self._build_expected_directories(parsed_rows)
-        actual_directories = self._scan_actual_directories(target_root)
+        depth_column_count = len(EXCEL_HEADERS) - 1
+        actual_directories = self._scan_actual_directories(target_root, depth_column_count)
 
         create_candidates = sorted(expected_directories - actual_directories, key=self._sort_key)
         delete_candidates = sorted(actual_directories - expected_directories, key=self._sort_key)
@@ -212,13 +213,15 @@ class DryRunAnalyzer:
                 expected_directories.add(current_path)
         return expected_directories
 
-    def _scan_actual_directories(self, target_root: Path) -> set[Path]:
+    def _scan_actual_directories(self, target_root: Path, max_depth: int) -> set[Path]:
         actual_directories: set[Path] = set()
         for path in target_root.rglob("*"):
             if not path.is_dir():
                 continue
             relative_path = path.relative_to(target_root)
             if relative_path.parts and relative_path.parts[0] in _SYSTEM_DIRECTORIES:
+                continue
+            if len(relative_path.parts) > max_depth:
                 continue
             actual_directories.add(relative_path)
         return actual_directories
