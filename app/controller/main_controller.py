@@ -160,7 +160,7 @@ class MainController:
         self._log(f"오류 row 수: {result.error_rows}")
         self._log(f"생성 예정 개수: {result.create_count}")
         self._log(f"삭제 후보 개수: {result.delete_count}")
-        self._log(f"위험 폴더 개수: {result.danger_count}")
+        self._log(f"확인필요 개수: {result.review_needed_count}")
         self._log(f"최종 판정: {'가능' if result.is_applicable else '불가'}")
 
     def apply_changes(self) -> None:

@@ -96,7 +96,7 @@ class MainWindow(QMainWindow):
         self.error_rows_value = self._create_value_label("-")
         self.create_count_value = self._create_value_label("-")
         self.delete_count_value = self._create_value_label("-")
-        self.danger_count_value = self._create_value_label("-")
+        self.review_needed_count_value = self._create_value_label("-")
         self.final_status_value = self._create_value_label("대기")
 
         summary_layout.addWidget(QLabel("총 row 수"), 0, 0)
@@ -109,8 +109,8 @@ class MainWindow(QMainWindow):
         summary_layout.addWidget(self.create_count_value, 1, 1)
         summary_layout.addWidget(QLabel("삭제 후보 개수"), 1, 2)
         summary_layout.addWidget(self.delete_count_value, 1, 3)
-        summary_layout.addWidget(QLabel("위험 폴더 개수"), 1, 4)
-        summary_layout.addWidget(self.danger_count_value, 1, 5)
+        summary_layout.addWidget(QLabel("확인필요 개수"), 1, 4)
+        summary_layout.addWidget(self.review_needed_count_value, 1, 5)
         summary_layout.addWidget(QLabel("최종 판정"), 2, 0)
         summary_layout.addWidget(self.final_status_value, 2, 1, 1, 5)
 
@@ -119,11 +119,11 @@ class MainWindow(QMainWindow):
         self.result_tabs = QTabWidget()
         self.create_candidates_output = self._create_result_box()
         self.delete_candidates_output = self._create_result_box()
-        self.danger_folders_output = self._create_result_box()
+        self.review_needed_output = self._create_result_box()
         self.row_errors_output = self._create_result_box()
         self.result_tabs.addTab(self.create_candidates_output, "생성 예정")
         self.result_tabs.addTab(self.delete_candidates_output, "삭제 후보")
-        self.result_tabs.addTab(self.danger_folders_output, "위험 폴더")
+        self.result_tabs.addTab(self.review_needed_output, "확인필요")
         self.result_tabs.addTab(self.row_errors_output, "row 오류")
         results_layout.addWidget(self.result_tabs)
 
@@ -170,11 +170,11 @@ class MainWindow(QMainWindow):
         self.error_rows_value.setText("-")
         self.create_count_value.setText("-")
         self.delete_count_value.setText("-")
-        self.danger_count_value.setText("-")
+        self.review_needed_count_value.setText("-")
         self.final_status_value.setText("대기")
         self.create_candidates_output.setPlainText("아직 dry-run 결과가 없습니다.")
         self.delete_candidates_output.setPlainText("아직 dry-run 결과가 없습니다.")
-        self.danger_folders_output.setPlainText("아직 dry-run 결과가 없습니다.")
+        self.review_needed_output.setPlainText("아직 dry-run 결과가 없습니다.")
         self.row_errors_output.setPlainText("아직 dry-run 결과가 없습니다.")
 
     def display_analysis_result(self, result: DryRunResult) -> None:
@@ -189,12 +189,12 @@ class MainWindow(QMainWindow):
         self.error_rows_value.setText(str(result.error_rows))
         self.create_count_value.setText(str(result.create_count))
         self.delete_count_value.setText(str(result.delete_count))
-        self.danger_count_value.setText(str(result.danger_count))
+        self.review_needed_count_value.setText(str(result.review_needed_count))
         self.final_status_value.setText("가능" if result.is_applicable else "불가")
 
         self.create_candidates_output.setPlainText(self._format_items(result.create_candidates, "생성 예정 폴더가 없습니다."))
         self.delete_candidates_output.setPlainText(self._format_items(result.delete_candidates, "삭제 후보 폴더가 없습니다."))
-        self.danger_folders_output.setPlainText(self._format_items(result.danger_folders, "위험 폴더가 없습니다."))
+        self.review_needed_output.setPlainText(self._format_items(result.review_needed_items, "확인필요 항목이 없습니다."))
         self.row_errors_output.setPlainText(self._format_errors(result.row_errors))
 
     def set_status_message(self, message: str) -> None:
