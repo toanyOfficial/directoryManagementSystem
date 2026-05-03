@@ -5,6 +5,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.formatting.rule import FormulaRule
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -60,6 +61,7 @@ class ExcelInitializer:
         self._write_headers(worksheet)
         self._apply_column_widths(worksheet)
         self._apply_data_validation(worksheet)
+        self._apply_skip_column_visibility_rule(worksheet)
         worksheet.freeze_panes = "A2"
 
         try:
@@ -121,3 +123,12 @@ class ExcelInitializer:
         )
         e_validation.add(f"E2:E{_MAX_EXCEL_ROWS}")
         worksheet.add_data_validation(e_validation)
+
+    def _apply_skip_column_visibility_rule(self, worksheet: Worksheet) -> None:
+        # E열에서 FALSE 값은 삭제하지 않고 "보이지 않게" 처리하기 위해 조건부 서식을 적용한다.
+        # EXACT($E2,"FALSE")가 참일 때 글자색을 흰색으로 바꿔 기본 배경(흰색)에서 숨김 효과를 낸다.
+        false_hidden_rule = FormulaRule(
+            formula=['EXACT($E2,"FALSE")'],
+            font=Font(color="FFFFFF"),
+        )
+        worksheet.conditional_formatting.add(f"E2:E{_MAX_EXCEL_ROWS}", false_hidden_rule)
