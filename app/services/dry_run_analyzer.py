@@ -5,7 +5,7 @@ from pathlib import Path, PureWindowsPath
 
 from openpyxl import load_workbook
 
-from app.services.excel_schema import EXCEL_HEADERS
+from app.services.excel_schema import EXCEL_HEADERS, MANAGED_DEPTH_COLUMN_COUNT
 from app.utils.path_validator import FolderNameValidator
 
 _SYSTEM_DIRECTORIES = {"logs", "backups", "_internal"}
@@ -92,7 +92,8 @@ class DryRunAnalyzer:
         try:
             worksheet = workbook.active
             header_values = tuple(
-                str(worksheet.cell(row=1, column=index).value or "").strip() for index in range(1, 6)
+                str(worksheet.cell(row=1, column=index).value or "").strip()
+                for index in range(1, len(EXCEL_HEADERS) + 1)
             )
             if header_values != EXCEL_HEADERS:
                 return self._fatal_result(
@@ -105,7 +106,7 @@ class DryRunAnalyzer:
             seen_paths: set[Path] = set()
             total_rows = 0
 
-            depth_column_count = len(EXCEL_HEADERS) - 1
+            depth_column_count = MANAGED_DEPTH_COLUMN_COUNT
             for row_number in range(2, worksheet.max_row + 1):
                 values = [worksheet.cell(row=row_number, column=index).value for index in range(1, len(EXCEL_HEADERS) + 1)]
                 normalized_values: list[str] = []
@@ -144,7 +145,7 @@ class DryRunAnalyzer:
             workbook.close()
 
         expected_directories = self._build_expected_directories(parsed_rows)
-        depth_column_count = len(EXCEL_HEADERS) - 1
+        depth_column_count = MANAGED_DEPTH_COLUMN_COUNT
         actual_directories = self._scan_actual_directories(target_root, depth_column_count)
 
         create_candidates = sorted(expected_directories - actual_directories, key=self._sort_key)
