@@ -106,10 +106,7 @@ class ApplyService:
                 raise RuntimeError(dry_run_result.fatal_error or "사전 검증에 실패했습니다.")
 
             if not dry_run_result.is_applicable:
-                raise RuntimeError("사전 검증 결과 적용 불가 상태입니다. row 오류 또는 위험 폴더를 먼저 해결하세요.")
-
-            if dry_run_result.danger_relative_paths:
-                raise RuntimeError("위험 폴더가 존재하여 적용을 중단합니다.")
+                raise RuntimeError("사전 검증 결과 적용 불가 상태입니다. row 오류 또는 삭제 후보를 먼저 해결하세요.")
 
             self._ensure_empty_delete_candidates(target_root, dry_run_result.delete_relative_paths)
             self._ensure_excel_writable(resolved_excel_path)

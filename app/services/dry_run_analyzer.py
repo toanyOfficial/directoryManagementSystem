@@ -42,16 +42,16 @@ class DryRunResult:
     error_rows: int
     create_count: int
     delete_count: int
-    danger_count: int
+    review_needed_count: int
     is_applicable: bool
     create_candidates: list[str] = field(default_factory=list)
     delete_candidates: list[str] = field(default_factory=list)
-    danger_folders: list[str] = field(default_factory=list)
+    review_needed_items: list[str] = field(default_factory=list)
     row_errors: list[RowError] = field(default_factory=list)
     parsed_rows: list[ParsedRow] = field(default_factory=list)
     create_relative_paths: list[Path] = field(default_factory=list)
     delete_relative_paths: list[Path] = field(default_factory=list)
-    danger_relative_paths: list[Path] = field(default_factory=list)
+    review_needed_relative_paths: list[Path] = field(default_factory=list)
 
 
 class DryRunAnalyzer:
@@ -147,16 +147,30 @@ class DryRunAnalyzer:
         actual_directories = self._scan_actual_directories(target_root, depth_column_count)
 
         create_candidates = sorted(expected_directories - actual_directories, key=self._sort_key)
-        delete_candidates = sorted(actual_directories - expected_directories, key=self._sort_key)
-        danger_folders = []
-        for relative_path in delete_candidates:
-            candidate_path = target_root / relative_path
-            try:
-                has_children = any(candidate_path.iterdir())
-            except OSError:
-                has_children = True
-            if has_children:
-                danger_folders.append(relative_path)
+        leaf_directories = {parsed_row.relative_path for parsed_row in parsed_rows}
+
+        # 삭제 후보 판단 로직
+        # 1) expected에 없는 실제 폴더
+        # 2) 관리 depth(현재 Depth1~Depth4) 이내
+        # 3) 부모가 leaf_directories인 경우 제외 (leaf 아래 데이터 구조 보호)
+        delete_candidates = sorted(
+            self._build_delete_candidates(
+                actual_directories=actual_directories,
+                expected_directories=expected_directories,
+                leaf_directories=leaf_directories,
+                managed_depth=depth_column_count,
+            ),
+            key=self._sort_key,
+        )
+
+        # 확인필요 판단 로직
+        # - 엑셀 leaf 경로가 실제로 존재하고
+        # - leaf 바로 아래 하위 폴더가 1~5개인 경우만 표시
+        review_needed = self._build_review_needed_items(
+            target_root=target_root,
+            leaf_directories=leaf_directories,
+            max_child_directory_count=5,
+        )
 
         return DryRunResult(
             success=True,
@@ -167,16 +181,17 @@ class DryRunAnalyzer:
             error_rows=len(row_errors),
             create_count=len(create_candidates),
             delete_count=len(delete_candidates),
-            danger_count=len(danger_folders),
-            is_applicable=(len(row_errors) == 0 and len(danger_folders) == 0),
+            review_needed_count=len(review_needed),
+            # apply 차단 기준: row 오류 또는 삭제 후보 존재
+            is_applicable=(len(row_errors) == 0 and len(delete_candidates) == 0),
             create_candidates=[self._format_path(path) for path in create_candidates],
             delete_candidates=[self._format_path(path) for path in delete_candidates],
-            danger_folders=[self._format_path(path) for path in danger_folders],
+            review_needed_items=[item["display"] for item in review_needed],
             row_errors=row_errors,
             parsed_rows=parsed_rows,
             create_relative_paths=create_candidates,
             delete_relative_paths=delete_candidates,
-            danger_relative_paths=danger_folders,
+            review_needed_relative_paths=[item["path"] for item in review_needed],
         )
 
     def _validate_row(self, row_values: list[str], depth_column_count: int) -> list[str]:
@@ -213,6 +228,59 @@ class DryRunAnalyzer:
                 expected_directories.add(current_path)
         return expected_directories
 
+    def _build_delete_candidates(
+        self,
+        actual_directories: set[Path],
+        expected_directories: set[Path],
+        leaf_directories: set[Path],
+        managed_depth: int,
+    ) -> set[Path]:
+        delete_candidates: set[Path] = set()
+        for actual_path in actual_directories:
+            if actual_path in expected_directories:
+                continue
+            if len(actual_path.parts) > managed_depth:
+                continue
+            if actual_path.parent in leaf_directories:
+                continue
+            delete_candidates.add(actual_path)
+        return delete_candidates
+
+    def _build_review_needed_items(
+        self,
+        target_root: Path,
+        leaf_directories: set[Path],
+        max_child_directory_count: int,
+    ) -> list[dict[str, object]]:
+        review_needed: list[dict[str, object]] = []
+        for leaf_path in sorted(leaf_directories, key=self._sort_key):
+            absolute_leaf_path = target_root / leaf_path
+            if not absolute_leaf_path.exists() or not absolute_leaf_path.is_dir():
+                continue
+            # leaf 바로 아래 하위 폴더만 집계한다.
+            child_directories = self._list_child_directories(absolute_leaf_path)
+            child_count = len(child_directories)
+            if child_count == 0 or child_count > max_child_directory_count:
+                continue
+            sample_children = [child.name for child in child_directories[:max_child_directory_count]]
+            display = (
+                f"{self._format_path(leaf_path)} "
+                f"(하위폴더 {child_count}개: {', '.join(sample_children)})"
+            )
+            review_needed.append(
+                {
+                    "path": leaf_path,
+                    "display": display,
+                }
+            )
+        return review_needed
+
+    def _list_child_directories(self, directory_path: Path) -> list[Path]:
+        try:
+            return sorted([child for child in directory_path.iterdir() if child.is_dir()], key=lambda path: path.name)
+        except OSError:
+            return []
+
     def _scan_actual_directories(self, target_root: Path, max_depth: int) -> set[Path]:
         actual_directories: set[Path] = set()
         for path in target_root.rglob("*"):
@@ -248,6 +316,6 @@ class DryRunAnalyzer:
             error_rows=0,
             create_count=0,
             delete_count=0,
-            danger_count=0,
+            review_needed_count=0,
             is_applicable=False,
         )
