@@ -63,6 +63,7 @@ class ExcelInitializer:
         self._apply_column_widths(worksheet)
         self._apply_data_validation(worksheet)
         self._apply_skip_column_visibility_rule(worksheet)
+        self._apply_relative_path_formula(worksheet)
         worksheet.freeze_panes = "A2"
 
         try:
@@ -133,3 +134,7 @@ class ExcelInitializer:
             font=Font(color="FFFFFF"),
         )
         worksheet.conditional_formatting.add(f"E2:E{_MAX_EXCEL_ROWS}", false_hidden_rule)
+
+    def _apply_relative_path_formula(self, worksheet: Worksheet) -> None:
+        # 템플릿 생성 시점부터 G열(상대경로)에 동일 수식을 선언해 즉시 사용할 수 있게 한다.
+        worksheet["G2"] = '=TEXTJOIN("\\",TRUE,A2:D2)'
