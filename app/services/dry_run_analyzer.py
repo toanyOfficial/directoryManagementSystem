@@ -47,6 +47,7 @@ class DryRunResult:
     create_candidates: list[str] = field(default_factory=list)
     delete_candidates: list[str] = field(default_factory=list)
     review_needed_items: list[str] = field(default_factory=list)
+    review_needed_details: list[dict[str, object]] = field(default_factory=list)
     row_errors: list[RowError] = field(default_factory=list)
     parsed_rows: list[ParsedRow] = field(default_factory=list)
     create_relative_paths: list[Path] = field(default_factory=list)
@@ -169,6 +170,7 @@ class DryRunAnalyzer:
         review_needed = self._build_review_needed_items(
             target_root=target_root,
             leaf_directories=leaf_directories,
+            expected_directories=expected_directories,
             max_child_directory_count=5,
         )
 
@@ -187,6 +189,7 @@ class DryRunAnalyzer:
             create_candidates=[self._format_path(path) for path in create_candidates],
             delete_candidates=[self._format_path(path) for path in delete_candidates],
             review_needed_items=[item["display"] for item in review_needed],
+            review_needed_details=review_needed,
             row_errors=row_errors,
             parsed_rows=parsed_rows,
             create_relative_paths=create_candidates,
@@ -250,6 +253,7 @@ class DryRunAnalyzer:
         self,
         target_root: Path,
         leaf_directories: set[Path],
+        expected_directories: set[Path],
         max_child_directory_count: int,
     ) -> list[dict[str, object]]:
         review_needed: list[dict[str, object]] = []
@@ -259,17 +263,28 @@ class DryRunAnalyzer:
                 continue
             # leaf 바로 아래 하위 폴더만 집계한다.
             child_directories = self._list_child_directories(absolute_leaf_path)
-            child_count = len(child_directories)
-            if child_count == 0 or child_count > max_child_directory_count:
+            undefined_child_directories = []
+            for child_directory in child_directories:
+                relative_child_path = (leaf_path / child_directory.name)
+                if relative_child_path in expected_directories:
+                    continue
+                undefined_child_directories.append(child_directory)
+
+            undefined_child_count = len(undefined_child_directories)
+            if undefined_child_count == 0 or undefined_child_count > max_child_directory_count:
                 continue
-            sample_children = [child.name for child in child_directories[:max_child_directory_count]]
+
+            sample_children = [child.name for child in undefined_child_directories[:3]]
             display = (
                 f"{self._format_path(leaf_path)} "
-                f"(하위폴더 {child_count}개: {', '.join(sample_children)})"
+                f"(미정의 하위폴더 {undefined_child_count}개: {', '.join(sample_children)})"
             )
             review_needed.append(
                 {
                     "path": leaf_path,
+                    "relative_path": self._format_path(leaf_path),
+                    "child_count": undefined_child_count,
+                    "sample_children": sample_children,
                     "display": display,
                 }
             )

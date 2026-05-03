@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import subprocess
 
 from PySide6.QtWidgets import QFileDialog
 
@@ -43,6 +44,7 @@ class MainController:
         self.view.dry_run_button.clicked.connect(self.run_dry_run)
         self.view.apply_button.clicked.connect(self.apply_changes)
         self.view.exit_button.clicked.connect(self.view.close)
+        self.view.set_item_click_handlers(self._handle_delete_item_click, self._handle_review_item_click)
 
     def _restore_settings(self) -> None:
         settings_data = self.settings_service.load()
@@ -210,3 +212,80 @@ class MainController:
     def _log(self, message: str) -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.view.append_log(f"[{timestamp}] {message}")
+
+    def _handle_delete_item_click(self, relative_path: str) -> None:
+        self._open_path_and_focus_excel(relative_path)
+
+    def _handle_review_item_click(self, relative_path: str) -> None:
+        self._open_path_and_focus_excel(relative_path)
+
+    def _open_path_and_focus_excel(self, relative_path: str) -> None:
+        if self.root_directory is None:
+            self._log("루트 디렉토리가 없어 클릭 항목 경로를 열 수 없습니다.")
+            return
+        absolute_path = self.root_directory / Path(relative_path)
+        try:
+            # Windows 탐색기를 절대경로로 연다.
+            subprocess.Popen(["explorer", str(absolute_path)])
+        except Exception as exc:
+            self._log(f"탐색기 열기 실패(무시): {exc}")
+        self._try_focus_excel_row(relative_path)
+
+    def _try_focus_excel_row(self, relative_path: str) -> None:
+        if self.selected_excel_path is None:
+            return
+        try:
+            import win32com.client  # type: ignore
+            from win32com.client import GetActiveObject  # type: ignore
+        except Exception:
+            return
+        try:
+            excel = GetActiveObject("Excel.Application")
+        except Exception:
+            return
+
+        target_book = None
+        for workbook in excel.Workbooks:
+            if Path(str(workbook.FullName)).resolve() == self.selected_excel_path:
+                target_book = workbook
+                break
+        if target_book is None:
+            return
+
+        worksheet = target_book.Worksheets(1)
+        target_row = self._find_best_matching_row(worksheet, relative_path)
+        if target_row is None:
+            return
+        try:
+            worksheet.Activate()
+            cell = worksheet.Cells(target_row, 1)
+            cell.Select()
+            excel.ActiveWindow.ScrollRow = max(1, target_row - 5)
+        except Exception:
+            return
+
+    def _find_best_matching_row(self, worksheet, relative_path: str) -> int | None:
+        parts = [part for part in str(relative_path).replace("/", "\\").split("\\") if part][:4]
+        if not parts:
+            return None
+        max_row = int(worksheet.UsedRange.Rows.Count) + 1
+        best_row = None
+        best_score = -1
+        best_depth = -1
+        for row in range(2, max_row + 1):
+            row_values = [str(worksheet.Cells(row, col).Value or "").strip() for col in range(1, 5)]
+            row_parts = [value for value in row_values if value]
+            # 완전 prefix 일치 우선: row_parts == relative_path 앞부분
+            if row_parts and parts[: len(row_parts)] == row_parts:
+                score = len(row_parts)
+            else:
+                score = 0
+                for idx, row_value in enumerate(row_values):
+                    if idx >= len(parts) or not row_value or row_value != parts[idx]:
+                        break
+                    score += 1
+            if score > best_score or (score == best_score and len(row_parts) > best_depth):
+                best_score = score
+                best_depth = len(row_parts)
+                best_row = row
+        return best_row if best_score > 0 else None

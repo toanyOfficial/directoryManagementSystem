@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QPlainTextEdit,
     QPushButton,
@@ -118,14 +120,18 @@ class MainWindow(QMainWindow):
         results_layout = QVBoxLayout(results_group)
         self.result_tabs = QTabWidget()
         self.create_candidates_output = self._create_result_box()
-        self.delete_candidates_output = self._create_result_box()
-        self.review_needed_output = self._create_result_box()
+        self.delete_candidates_output = QListWidget()
+        self.review_needed_output = QListWidget()
         self.row_errors_output = self._create_result_box()
         self.result_tabs.addTab(self.create_candidates_output, "생성 예정")
         self.result_tabs.addTab(self.delete_candidates_output, "삭제 후보")
         self.result_tabs.addTab(self.review_needed_output, "확인필요")
         self.result_tabs.addTab(self.row_errors_output, "row 오류")
         results_layout.addWidget(self.result_tabs)
+        self._delete_click_handler = None
+        self._review_click_handler = None
+        self.delete_candidates_output.itemActivated.connect(self._on_delete_item_activated)
+        self.review_needed_output.itemActivated.connect(self._on_review_item_activated)
 
         log_group = QGroupBox("실행 로그")
         log_layout = QVBoxLayout(log_group)
@@ -173,8 +179,8 @@ class MainWindow(QMainWindow):
         self.review_needed_count_value.setText("-")
         self.final_status_value.setText("대기")
         self.create_candidates_output.setPlainText("아직 dry-run 결과가 없습니다.")
-        self.delete_candidates_output.setPlainText("아직 dry-run 결과가 없습니다.")
-        self.review_needed_output.setPlainText("아직 dry-run 결과가 없습니다.")
+        self.delete_candidates_output.clear()
+        self.review_needed_output.clear()
         self.row_errors_output.setPlainText("아직 dry-run 결과가 없습니다.")
 
     def display_analysis_result(self, result: DryRunResult) -> None:
@@ -193,8 +199,16 @@ class MainWindow(QMainWindow):
         self.final_status_value.setText("가능" if result.is_applicable else "불가")
 
         self.create_candidates_output.setPlainText(self._format_items(result.create_candidates, "생성 예정 폴더가 없습니다."))
-        self.delete_candidates_output.setPlainText(self._format_items(result.delete_candidates, "삭제 후보 폴더가 없습니다."))
-        self.review_needed_output.setPlainText(self._format_items(result.review_needed_items, "확인필요 항목이 없습니다."))
+        self._set_clickable_items(
+            self.delete_candidates_output,
+            result.delete_relative_paths,
+            "삭제 후보 폴더가 없습니다.",
+        )
+        self._set_clickable_items(
+            self.review_needed_output,
+            result.review_needed_relative_paths,
+            "확인필요 항목이 없습니다.",
+        )
         self.row_errors_output.setPlainText(self._format_errors(result.row_errors))
 
     def set_status_message(self, message: str) -> None:
@@ -219,6 +233,36 @@ class MainWindow(QMainWindow):
         font.setStyleHint(QFont.Monospace)
         output.setFont(font)
         return output
+
+    def set_item_click_handlers(self, delete_handler, review_handler) -> None:
+        self._delete_click_handler = delete_handler
+        self._review_click_handler = review_handler
+
+    def _set_clickable_items(self, widget: QListWidget, relative_paths: list[Path], empty_message: str) -> None:
+        widget.clear()
+        if not relative_paths:
+            widget.addItem(QListWidgetItem(empty_message))
+            widget.setEnabled(False)
+            return
+        widget.setEnabled(True)
+        for relative_path in relative_paths:
+            item = QListWidgetItem(str(relative_path))
+            item.setData(256, str(relative_path))
+            widget.addItem(item)
+
+    def _on_delete_item_activated(self, item: QListWidgetItem) -> None:
+        if self._delete_click_handler is None:
+            return
+        relative_path = item.data(256)
+        if relative_path:
+            self._delete_click_handler(str(relative_path))
+
+    def _on_review_item_activated(self, item: QListWidgetItem) -> None:
+        if self._review_click_handler is None:
+            return
+        relative_path = item.data(256)
+        if relative_path:
+            self._review_click_handler(str(relative_path))
 
     def _create_value_label(self, initial_text: str) -> QLabel:
         label = QLabel(initial_text)
