@@ -106,10 +106,7 @@ class ApplyService:
                 raise RuntimeError(dry_run_result.fatal_error or "사전 검증에 실패했습니다.")
 
             if not dry_run_result.is_applicable:
-                raise RuntimeError("사전 검증 결과 적용 불가 상태입니다. row 오류 또는 위험 폴더를 먼저 해결하세요.")
-
-            if dry_run_result.danger_relative_paths:
-                raise RuntimeError("위험 폴더가 존재하여 적용을 중단합니다.")
+                raise RuntimeError("사전 검증 결과 적용 불가 상태입니다. row 오류 또는 삭제 후보를 먼저 해결하세요.")
 
             self._ensure_empty_delete_candidates(target_root, dry_run_result.delete_relative_paths)
             self._ensure_excel_writable(resolved_excel_path)
@@ -214,15 +211,63 @@ class ApplyService:
         workbook = load_workbook(excel_path)
         try:
             worksheet = workbook.active
+            updated_cells: set[tuple[int, int]] = set()
             for parsed_row in parsed_rows:
-                cell = worksheet.cell(row=parsed_row.row_number, column=4)
-                hyperlink_target = os.path.relpath(target_root / parsed_row.relative_path, start=excel_path.parent)
-                cell.hyperlink = str(PureWindowsPath(hyperlink_target))
-                cell.style = "Hyperlink"
+                # Always link the final created folder for each row.
+                self._set_hyperlink_cell(
+                    worksheet=worksheet,
+                    row_number=parsed_row.row_number,
+                    column_number=parsed_row.hyperlink_column,
+                    target_path=(target_root / parsed_row.relative_path),
+                    excel_parent=excel_path.parent,
+                    updated_cells=updated_cells,
+                )
+
+                # Link intermediate depth cells only when the folder contains files directly.
+                current_path = Path()
+                for depth_index, part in enumerate(parsed_row.path_parts[:-1], start=1):
+                    current_path /= part
+                    if not self._directory_contains_files(target_root / current_path):
+                        continue
+                    self._set_hyperlink_cell(
+                        worksheet=worksheet,
+                        row_number=parsed_row.row_number,
+                        column_number=depth_index,
+                        target_path=(target_root / current_path),
+                        excel_parent=excel_path.parent,
+                        updated_cells=updated_cells,
+                    )
             workbook.save(excel_path)
         finally:
             workbook.close()
-        return len(parsed_rows)
+        return len(updated_cells)
+
+    def _set_hyperlink_cell(
+        self,
+        worksheet,
+        row_number: int,
+        column_number: int,
+        target_path: Path,
+        excel_parent: Path,
+        updated_cells: set[tuple[int, int]],
+    ) -> None:
+        key = (row_number, column_number)
+        if key in updated_cells:
+            return
+        cell = worksheet.cell(row=row_number, column=column_number)
+        hyperlink_target = os.path.relpath(target_path, start=excel_parent)
+        cell.hyperlink = str(PureWindowsPath(hyperlink_target))
+        cell.style = "Hyperlink"
+        updated_cells.add(key)
+
+    def _directory_contains_files(self, directory_path: Path) -> bool:
+        try:
+            for child in directory_path.iterdir():
+                if child.is_file():
+                    return True
+        except OSError:
+            return False
+        return False
 
     def _ensure_empty_delete_candidates(self, target_root: Path, relative_paths: list[Path]) -> None:
         for relative_path in relative_paths:

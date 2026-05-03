@@ -10,13 +10,41 @@
 - 엑셀 row를 읽어 목표 디렉토리 구조 분석
 - 실제 디렉토리와 비교한 dry-run 결과 표시
 - 안전 검증 후 실제 반영(apply)
-- `업무` 셀에 상대경로 하이퍼링크 갱신
+- 실제 마지막 depth 셀에 상대경로 하이퍼링크 갱신
 - 실행 로그 및 엑셀 백업 생성
 - 마지막 사용 엑셀 경로 / 루트 디렉토리 저장
 
 기본 GUI는 `PySide6`, 엑셀 처리는 `openpyxl`, exe 패키징은 `PyInstaller`를 사용합니다.
 
 ## 2. 설치 및 실행
+
+### 권장 환경
+
+- OS: Windows 10/11
+- Python: 3.10 ~ 3.12 권장
+- 인코딩/경로 문제를 줄이기 위해 프로젝트 경로는 가능한 한 영문 경로 권장
+
+### 가상환경(venv) 생성 및 의존성 설치 (권장)
+
+PowerShell 기준:
+
+```powershell
+cd <프로젝트_루트>
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+CMD 기준:
+
+```bat
+cd <프로젝트_루트>
+py -3 -m venv .venv
+.\.venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
 
 ### GUI 실행
 
@@ -33,11 +61,25 @@ python -m app.main --help
 
 ### Windows exe 패키징
 
-```bash
-pyinstaller --clean directory_management_system.spec
+```powershell
+python -m PyInstaller --clean directory_management_system.spec
 ```
 
 빌드가 끝나면 실행 파일은 `dist/DirectoryManagementSystem/` 아래에 생성됩니다.
+
+> `pyinstaller` 명령이 인식되지 않으면, PATH 문제일 가능성이 큽니다.  
+> 이 프로젝트에서는 `python -m PyInstaller ...` 형태를 기본 명령으로 사용하세요.
+
+### 빌드 빠른 점검 명령
+
+```powershell
+python --version
+python -m pip --version
+python -m pip show pyinstaller
+python -m PyInstaller --version
+```
+
+정상이라면 마지막 명령에서 버전이 출력됩니다.
 
 ## 3. 사용 방법
 
@@ -64,28 +106,35 @@ pyinstaller --clean directory_management_system.spec
 
 헤더는 아래 순서를 그대로 사용해야 합니다.
 
-- 대분류
-- 중분류
-- 소분류
-- 업무
+- Depth1
+- Depth2
+- Depth3
+- Depth4
 - 비고
 
 구조 규칙:
 
-- `대분류` 필수
-- `업무` 필수
-- `중분류`, `소분류`는 선택
-- `소분류`가 있으면 `중분류`도 반드시 있어야 함
-- 중간 누락 구조는 오류
+- `Depth1` 필수
+- `Depth2~Depth4`는 선택
+- 값이 존재하는 마지막 depth까지만 폴더 생성
+- 중간 누락 구조는 오류  
+  (예: `Depth1=값`, `Depth2=빈값`, `Depth3=값`)
 - 중복 구조는 오류
 
 예시:
 
-| 대분류 | 중분류 | 소분류 | 업무 | 비고 |
+| Depth1 | Depth2 | Depth3 | Depth4 | 비고 |
 | --- | --- | --- | --- | --- |
-| 사업A |  |  | 계획수립 |  |
-| 사업A | 운영 |  | 월간보고 |  |
-| 사업A | 운영 | 정산 | 비용정리 |  |
+| 사업A |  |  |  | 단일 depth |
+| 사업A | 운영 |  |  | 2-depth |
+| 사업A | 운영 | 정산 |  | 3-depth |
+| 사업A | 운영 | 정산 | 비용정리 | 4-depth |
+
+생성 경로 예시:
+
+- `Depth1=A, Depth2=B, Depth3=빈값, Depth4=빈값` → `A/B`
+- `Depth1=A, Depth2=B, Depth3=C, Depth4=빈값` → `A/B/C`
+- `Depth1=A, Depth2=빈값, Depth3=빈값, Depth4=빈값` → `A`
 
 ## 5. 폴더명 규칙
 
@@ -137,17 +186,72 @@ apply는 항상 아래 순서로 진행됩니다.
 3. 엑셀 파일 저장 가능 여부 확인 (열려 있으면 중단)
 4. 엑셀 백업 생성
 5. 폴더 생성
-6. `업무` 셀 하이퍼링크 갱신
+6. 각 row의 **마지막 depth 셀** 하이퍼링크 갱신
 7. 빈 폴더만 삭제
 8. 로그 파일 기록
 
 하이퍼링크 규칙:
 
-- `업무` 셀에 설정
+- 각 row에서 실제 생성된 최종 폴더(depth 마지막 값)의 셀에 설정
 - 텍스트는 유지
 - 엑셀 파일 위치를 기준으로 한 상대경로 사용
 
-## 8. 로그 설명
+## 8. exe 빌드 트러블슈팅 (Windows)
+
+### 증상 1) `pyinstaller` 명령을 찾을 수 없음
+
+오류 예:
+
+```text
+'pyinstaller' 용어가 ... 인식되지 않습니다.
+```
+
+원인:
+
+- PyInstaller 미설치
+- 설치는 되었지만 `Scripts` 경로가 PATH에 없음
+- 다른 Python 인터프리터에 설치됨
+
+해결:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install --upgrade pyinstaller
+python -m PyInstaller --clean directory_management_system.spec
+```
+
+핵심은 `pyinstaller` 직접 호출 대신 `python -m PyInstaller`를 사용하는 것입니다.
+
+### 증상 2) 빌드 결과 폴더가 안 생김
+
+점검:
+
+```powershell
+python -m PyInstaller --version
+python -m PyInstaller --clean --noconfirm directory_management_system.spec
+```
+
+- 오류가 발생하면 해당 스택트레이스 기준으로 누락 모듈/권한/경로 이슈를 먼저 해결하세요.
+- 일반적으로 결과물은 아래 경로에 생성됩니다.
+  - `dist/DirectoryManagementSystem/DirectoryManagementSystem.exe`
+
+### 증상 3) 실행 시 DLL/플러그인 관련 오류
+
+- 보안 프로그램이 dist 내부 파일을 격리했는지 확인
+- 한글/특수문자 경로 대신 짧은 영문 경로에서 재빌드
+- 가상환경 새로 생성 후 재설치:
+
+```powershell
+deactivate
+rmdir /s /q .venv
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m PyInstaller --clean directory_management_system.spec
+```
+
+## 9. 로그 설명
 
 apply 실행 시 루트 디렉토리 아래 `logs/` 폴더가 생성되며, `apply_YYYYMMDD_HHMMSS.log` 형식의 로그가 저장됩니다.
 
@@ -180,7 +284,7 @@ apply 실행 시 루트 디렉토리 아래 `logs/` 폴더가 생성되며, `app
 결과: 적용이 완료되었습니다.
 ```
 
-## 9. 주의사항
+## 10. 주의사항
 
 - 삭제는 **항상 마지막**에만 수행됩니다.
 - 삭제 대상은 **완전히 빈 폴더만** 허용됩니다.
@@ -189,7 +293,7 @@ apply 실행 시 루트 디렉토리 아래 `logs/` 폴더가 생성되며, `app
 - apply 중 오류가 나면 가능한 범위에서 롤백을 시도하지만, 파일 시스템 작업은 운영체제 잠금 상태, Dropbox 동기화 지연, 외부 프로그램 점유, 강제 종료 상황 때문에 완전한 원자성을 보장할 수 없습니다.
 - apply 전에 반드시 dry-run으로 결과를 확인하는 것을 권장합니다.
 
-## 10. 파일 구성
+## 11. 파일 구성
 
 - `app/main.py`: 앱 진입점
 - `app/gui_app.py`: GUI 실행 진입점
@@ -203,7 +307,7 @@ apply 실행 시 루트 디렉토리 아래 `logs/` 폴더가 생성되며, `app
 - `app/utils/path_validator.py`: 폴더명 검증
 - `directory_management_system.spec`: PyInstaller 설정
 
-## 11. CLI 예시
+## 12. CLI 예시
 
 ### 초기화
 
