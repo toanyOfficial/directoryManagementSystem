@@ -18,6 +18,7 @@ _COLUMN_WIDTHS: dict[str, float] = {
     "D": 28,
     "E": 18,
     "F": 36,
+    "G": 44,
 }
 _MAX_EXCEL_ROWS = 1048576
 

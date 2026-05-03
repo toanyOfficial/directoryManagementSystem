@@ -261,6 +261,9 @@ class DryRunAnalyzer:
         review_needed: list[dict[str, object]] = []
         for parsed_row in sorted(parsed_rows, key=lambda row: self._sort_key(row.relative_path)):
             leaf_path = parsed_row.relative_path
+            # Depth4 leaf 아래는 5depth 이상 자유 영역이므로 확인필요 검사에서 무조건 제외한다.
+            if len(leaf_path.parts) >= MANAGED_DEPTH_COLUMN_COUNT:
+                continue
             # E열(하위폴더생략)이 TRUE이면 확인필요에서 제외한다.
             if parsed_row.skip_children:
                 continue
