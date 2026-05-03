@@ -234,10 +234,19 @@ class MainController:
             self._log(f"탐색기 열기 실패(무시): {exc}")
 
         try:
-            # 클립보드에는 절대경로가 아닌 상대경로 문자열만 복사한다.
+            # 클립보드에는 절대경로가 아닌 상대경로 문자열만 복사하고, 검색 불일치 방지를 위해 정규화한다.
+            clean_relative_path = (
+                str(relative_path)
+                .strip()
+                .replace("\r", "")
+                .replace("\n", "")
+                .replace("\u200b", "")
+                .replace("\ufeff", "")
+                .replace("/", "\\")
+            )
             clipboard = QApplication.clipboard()
-            clipboard.setText(str(relative_path))
-            self._log(f"상대경로를 클립보드에 복사했습니다: {relative_path}")
+            clipboard.setText(clean_relative_path)
+            self._log(f"상대경로를 클립보드에 복사했습니다: {clean_relative_path}")
         except Exception as exc:
             self._log(f"클립보드 복사 실패(무시): {exc}")
 
